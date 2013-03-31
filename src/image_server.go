@@ -7,35 +7,54 @@ import(
   "log"
   "io/ioutil"
   "path/filepath"
+  "launchpad.net/goyaml"
 )
 
 type myHandler struct {
   missing_image []byte
+  domain string
+  tracker string
   handler http.Handler
 }
 
 func main() {
-  fmt.Print("Hello")
   missing, err := ioutil.ReadFile("/home/zmack/Pictures/smallgoat.jpg")
   if err != nil {
     return
   }
 
+  settings := getSettings("settings.yaml")
+
   server := &http.Server{
-    Addr: ":3002",
+    Addr: settings["listen_address"],
     Handler: myHandler{
       missing_image: missing,
+      domain: settings["domain"],
+      tracker: settings["tracker"],
     },
     ReadTimeout:    10 * time.Second,
     WriteTimeout:   10 * time.Second,
     MaxHeaderBytes: 1 << 20,
   }
 
+  fmt.Printf("Up, listening on %s, connecting to %s.\n", settings["listen_address"], settings["tracker"])
+  fmt.Printf("Domain is %s. Everything is horrible.\n", settings["domain"])
   log.Fatal(server.ListenAndServe())
 }
 
+func getSettings(path string) map[string]string {
+  bytes, err := ioutil.ReadFile(path)
+  if err != nil {
+    return map[string]string{ "domain": "defaultDomain" }
+  }
+  var settings map[string]string
+  goyaml.Unmarshal(bytes, &settings)
+
+  return settings
+}
+
 func (handler myHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-  client, err := mogile.Connect("127.0.0.1:7001")
+  client, err := mogile.Connect(handler.tracker)
   key, _ := filepath.Split(request.URL.Path)
 
   if err != nil {
@@ -44,7 +63,7 @@ func (handler myHandler) ServeHTTP(writer http.ResponseWriter, request *http.Req
     return
   }
 
-  paths := client.GetPaths(key[1:len(key)-1], "foobar")
+  paths := client.GetPaths(key[1:len(key)-1], handler.domain)
 
   if len(paths) == 0 {
     writer.Header().Set("Content-Type", "image/jpeg")

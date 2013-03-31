@@ -91,23 +91,3 @@ func GetUrl(url string) {
     fmt.Print(err)
   }
 }
-
-func main() {
-  client, err := Connect("127.0.0.1:7001")
-
-  if err != nil {
-    return
-  }
-
-  client.RunCommand("list_keys", url.Values{ "key": []string{"Artist/149/image"},
-                                             "domain": []string{"foobar"} })
-
-  client.RunCommand("file_info", url.Values{ "key": []string{"Artist/149/image"},
-                                             "domain": []string{"foobar"} })
-
-  paths := client.GetPaths("Artist/149/image", "foobar")
-
-  fmt.Print(paths)
-
-  // GetUrl("http://127.0.0.1:7500/dev1/0/000/000/0000000222.fid")
-}
