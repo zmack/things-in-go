@@ -58,10 +58,6 @@ func (client MogileClient) GetPaths(key string, domain string) []string {
     return []string{}
   }
 
-  fmt.Print("\n")
-  fmt.Print(response)
-  fmt.Print("\n")
-  fmt.Print(response["unknown_key"])
   num_paths, _ := strconv.ParseInt(response["paths"][0], 10, 8)
   paths := make([]string, num_paths)
 

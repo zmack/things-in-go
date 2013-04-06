@@ -1,6 +1,7 @@
 package main
 import(
   "./mogile"
+  "./lru_cache"
   "fmt"
   "net/http"
   "time"
@@ -15,6 +16,11 @@ type myHandler struct {
   domain string
   tracker string
   handler http.Handler
+  cache *cache.LRUCache
+}
+
+type lruValue struct {
+  value string
 }
 
 func main() {
@@ -31,6 +37,7 @@ func main() {
       missing_image: missing,
       domain: settings["domain"],
       tracker: settings["tracker"],
+      cache: cache.NewLRUCache(1000),
     },
     ReadTimeout:    10 * time.Second,
     WriteTimeout:   10 * time.Second,
@@ -40,6 +47,14 @@ func main() {
   fmt.Printf("Up, listening on %s, connecting to %s.\n", settings["listen_address"], settings["tracker"])
   fmt.Printf("Domain is %s. Everything is horrible.\n", settings["domain"])
   log.Fatal(server.ListenAndServe())
+}
+
+func (value lruValue) Size() int {
+  return len(value.value)
+}
+
+func (value lruValue) Value() string {
+  return value.value
 }
 
 func getSettings(path string) map[string]string {
@@ -54,23 +69,45 @@ func getSettings(path string) map[string]string {
 }
 
 func (handler myHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-  client, err := mogile.Connect(handler.tracker)
-  key, _ := filepath.Split(request.URL.Path)
+  path, _ := filepath.Split(request.URL.Path)
+  mogile_key := path[1:len(path)-1]
 
-  if err != nil {
-    writer.Header().Set("Content-Type", "image/jpeg")
-    writer.Write(handler.missing_image)
-    return
-  }
+  path, err := handler.getPathForKey(mogile_key)
+  fmt.Printf("Got path %s\n", path)
 
-  paths := client.GetPaths(key[1:len(key)-1], handler.domain)
-
-  if len(paths) == 0 {
+  if len(path) == 0 || err != nil {
     writer.Header().Set("Content-Type", "image/jpeg")
     writer.Write(handler.missing_image)
   } else {
-    spitFile(paths[0], writer)
+    spitFile(path, writer)
   }
+}
+
+func (handler myHandler) getPathForKey(mogile_key string) (value string, err error) {
+  cached_value, ok := handler.cache.Get(mogile_key)
+
+  if ok {
+    lru_value := *cached_value.(*lruValue)
+    return lru_value.value, nil
+  }
+
+  fmt.Printf("Cache miss for %s", mogile_key)
+
+  client, err := mogile.Connect(handler.tracker)
+  if err != nil {
+    return "", err
+  }
+
+  paths := client.GetPaths(mogile_key, handler.domain)
+
+  if len(paths) == 0 {
+    handler.cache.Set(mogile_key, &lruValue{value: ""})
+    return "", nil
+  }
+
+  handler.cache.Set(mogile_key, &lruValue{value: paths[0]})
+  return paths[0], nil
+
 }
 
 func spitFile(url string, writer http.ResponseWriter) {
