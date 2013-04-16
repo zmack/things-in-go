@@ -2,13 +2,17 @@ package main
 import(
   "./mogile"
   "./lru_cache"
+  "os"
   "fmt"
   "net/http"
   "time"
   "log"
+  "io"
   "io/ioutil"
   "path/filepath"
   "launchpad.net/goyaml"
+  "runtime"
+  "runtime/pprof"
 )
 
 type myHandler struct {
@@ -29,6 +33,18 @@ func main() {
     return
   }
 
+  file, err := os.Create("profile.prof")
+
+  if err != nil {
+    fmt.Print("Shit broke\n")
+    return
+  }
+
+  pprof.StartCPUProfile(file)
+  defer pprof.StopCPUProfile()
+  cpus := runtime.NumCPU()
+  runtime.GOMAXPROCS(cpus);
+
   settings := getSettings("settings.yaml")
 
   server := &http.Server{
@@ -44,7 +60,7 @@ func main() {
     MaxHeaderBytes: 1 << 20,
   }
 
-  fmt.Printf("Up, listening on %s, connecting to %s.\n", settings["listen_address"], settings["tracker"])
+  fmt.Printf("Up, listening on %s, connecting to %s. Using %d CPUs\n", settings["listen_address"], settings["tracker"], cpus)
   fmt.Printf("Domain is %s. Everything is horrible.\n", settings["domain"])
   log.Fatal(server.ListenAndServe())
 }
@@ -73,7 +89,7 @@ func (handler myHandler) ServeHTTP(writer http.ResponseWriter, request *http.Req
   mogile_key := path[1:len(path)-1]
 
   path, err := handler.getPathForKey(mogile_key)
-  fmt.Printf("Got path %s\n", path)
+  // fmt.Printf("Got path %s\n", path)
 
   if len(path) == 0 || err != nil {
     writer.Header().Set("Content-Type", "image/jpeg")
@@ -91,7 +107,7 @@ func (handler myHandler) getPathForKey(mogile_key string) (value string, err err
     return lru_value.value, nil
   }
 
-  fmt.Printf("Cache miss for %s", mogile_key)
+  fmt.Printf("Cache miss for %s\n", mogile_key)
 
   client, err := mogile.Connect(handler.tracker)
   if err != nil {
@@ -116,11 +132,23 @@ func spitFile(url string, writer http.ResponseWriter) {
     return
   }
 
-  buffer, err := ioutil.ReadAll(resp.Body)
-  if err != nil {
-    return
-  }
+  buffer := make([]byte, 8096)
+  sent_content_type := false
 
-  writer.Header().Set("Content-Type", http.DetectContentType(buffer))
-  writer.Write(buffer)
+  for {
+    bytes_read, err := resp.Body.Read(buffer)
+
+    if bytes_read <= 0 {
+      if err == io.EOF {
+        break;
+      }
+    }
+
+    if !sent_content_type {
+      writer.Header().Set("Content-Type", http.DetectContentType(buffer))
+      sent_content_type = true
+    }
+
+    writer.Write(buffer[0:bytes_read])
+  }
 }
